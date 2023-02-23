@@ -1,6 +1,7 @@
 import os
 import socket
 import requests
+import urllib.request
 import json
 from IPy import IP
 
@@ -31,24 +32,32 @@ def get_ip_seg2(start_ip, end_ip, ip):
 
 class fastwhois:
     localData = None
+    #localData2 = None
     def __init__(self):
-        self.localPath = ipinfo = os.path.dirname(__file__) + "/ipinfo.json"
+        self.localPath = os.path.dirname(__file__) + "/ipinfo2.json"
+        #self.localPath2 = os.path.dirname(__file__) + "/ipinfo2.json"
         self.sortedIPv4Seg = []
         self.sortedIPv6Seg = []
         with open(self.localPath, 'r') as f:
             fastwhois.localData = eval(f.readline().strip())
+#         with open(self.localPath2, 'r') as f:
+#             fastwhois.localData2 = eval(f.readline().strip())
     
     def update(self):
         #fastwhois.localData[key] = val
         with open(self.localPath, 'w') as f:
             f.write(str(fastwhois.localData))
+#     def update2(self):
+#         #fastwhois.localData[key] = val
+#         with open(self.localPath2, 'w') as f:
+#             f.write(str(fastwhois.localData2))
     
     def query(self, ip):
         if ip in fastwhois.localData:
             return fastwhois.localData[ip]
         else:
-            info = self.onlineWhois(ip)
-            info["geo"] = self.onlineGeo(ip)
+            info = self.onlineWhois2(ip)
+            #info["geo"] = self.onlineGeo(ip)
             #self.update(ip, info)
             fastwhois.localData[ip] = info
             return info
@@ -65,6 +74,7 @@ class fastwhois:
                 break
             result.extend(data)
         s.close()
+        #print(result)
         info = {"ip_seg":"", "net_name":""}
         begin_ip = ""
         end_ip = ""
@@ -98,15 +108,36 @@ class fastwhois:
                     info["ip_seg"] = line.split()[-1]
                 elif line.startswith('netname'):
                     info["net_name"] = line.split()[-1]
+        #print(result)
         if info["ip_seg"] == "" and "." in begin_ip and end_ip:
             info["ip_seg"] = get_ip_seg2(begin_ip, end_ip, ip)
         return info
+    
+    def onlineWhois2(self, ip):
+        ipinfo = {'ip_seg':'', 'net_name':'', 'inetnum':''}
+        url = "https://rdap-bootstrap.arin.net/bootstrap/ip/" + ip
+        try:
+            with urllib.request.urlopen(url) as response:
+                data = response.read().decode()
+            data = json.loads(data)
+        except:
+            return ipinfo
+        if 'cidr0_cidrs' in data:
+            if ":" in ip:
+                ipinfo['ip_seg'] = data['cidr0_cidrs'][0]['v6prefix'] + '/' + str(data['cidr0_cidrs'][0]['length'])
+            else:
+                ipinfo['ip_seg'] = data['cidr0_cidrs'][0]['v4prefix'] + '/' + str(data['cidr0_cidrs'][0]['length'])
+        if 'name' in data:
+            ipinfo['net_name'] = data['name']
+        if 'startAddress' in data:
+            ipinfo['inetnum'] = data['startAddress'] + '-' + data['endAddress']
+        return ipinfo
     
     def loadSegList(self,):
         self.sortedIPv6Seg = set()
         self.sortedIPv4Seg = set()
         for key in fastwhois.localData:
-            if not fastwhois.localData[key]["ip_seg"]:
+            if fastwhois.localData[key]["ip_seg"] in ["0.0.0.0/0", "::/0", ""]:
                 continue
             if ":" in key:
                 self.sortedIPv6Seg.add(fastwhois.localData[key]["ip_seg"])
@@ -155,10 +186,18 @@ class fastwhois:
         return {}
             
         
-    def onlineGeo(self, ip):
+    def IPGeo(self, ip):
+        if ip in fastwhois.localData and "geo" in fastwhois.localData[ip]:
+            return fastwhois.localData[ip]["geo"]
         geoapi = "http://ip.zxinc.org/api.php?type=json&ip="
         headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:78.0) Gecko/20100101 Firefox/78.0'}
         url = geoapi + ip
-        r = requests.get(url,headers=headers)
-        s = json.loads(r.text[0:])
-        return s['data']['country']
+        try:
+            r = requests.get(url,headers=headers)
+            s = json.loads(r.text[0:])
+            geo = s['data']['country']
+        except:
+            geo = ""
+        self.query(ip)
+        fastwhois.localData[ip]["geo"] = geo
+        return geo
